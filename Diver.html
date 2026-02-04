@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Titan Captain | v3.5 API</title>
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0f172a; color: white; overflow: hidden; }
+        #map { height: 100vh; width: 100%; position: absolute; z-index: 1; filter: brightness(0.4) contrast(1.2) invert(1); }
+        .ui-panel { position: fixed; bottom: 0; left: 0; right: 0; z-index: 100; background: rgba(15, 23, 42, 0.98); backdrop-filter: blur(20px); border-radius: 40px 40px 0 0; padding: 25px; border-top: 1px solid rgba(255,255,255,0.1); }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="absolute top-6 left-6 right-6 z-50 flex justify-between pointer-events-none">
+    <div class="bg-slate-900/90 px-5 py-3 rounded-full border border-white/10 pointer-events-auto flex items-center gap-3">
+        <div id="statusDot" class="w-2.5 h-2.5 rounded-full bg-red-500"></div>
+        <span id="statusTxt" class="text-[10px] font-black uppercase text-slate-400">Standby</span>
+    </div>
+    <div class="bg-slate-900/90 px-6 py-3 rounded-full border border-white/10 pointer-events-auto">
+        <span class="text-emerald-400 font-black italic text-sm">₹<span id="walletAmt">0.00</span></span>
+    </div>
+</div>
+
+<div id="loginPage" class="fixed inset-0 z-[1000] bg-[#0f172a] p-8 flex flex-col justify-center text-center">
+    <h1 class="text-5xl font-black italic mb-10 text-white tracking-tighter">TITAN<span class="text-sky-500">DRIVE</span></h1>
+    <div id="recaptcha-container"></div>
+    <div id="authUI" class="space-y-4">
+        <input id="phone" type="tel" placeholder="Captain Number" class="w-full p-6 bg-slate-900 border border-slate-800 rounded-3xl font-bold text-center text-white outline-none">
+        <button onclick="sendOTP()" class="w-full bg-sky-500 py-6 rounded-3xl font-black text-lg active:scale-95 transition-all">INITIALIZE</button>
+    </div>
+    <div id="otpUI" class="hidden space-y-4">
+        <input id="otpCode" type="number" placeholder="OTP" class="w-full p-6 bg-slate-900 border-2 border-sky-500 rounded-3xl text-center text-4xl font-black outline-none">
+        <button onclick="verifyOTP()" class="w-full bg-white text-slate-900 py-6 rounded-3xl font-black">LOGIN</button>
+    </div>
+</div>
+
+<div id="mainApp" class="hidden">
+    <div class="ui-panel">
+        <div id="dutyView">
+            <h3 class="text-2xl font-black italic mb-1">Mission Control</h3>
+            <p class="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-6">Backend Node Connected</p>
+            <button id="dutyBtn" onclick="toggleDuty()" class="w-full bg-red-600 text-white py-7 rounded-[2.5rem] font-black text-xl shadow-2xl active:scale-95 transition-all">GO ONLINE</button>
+        </div>
+
+        <div id="missionPopup" class="hidden bg-white text-slate-900 p-8 rounded-[3rem] space-y-5 animate-bounce">
+            <div class="flex justify-between items-start border-b border-slate-100 pb-4">
+                <div><p class="text-[10px] font-black text-sky-500 uppercase italic">New Request</p><h4 id="dropName" class="text-xl font-black">Destination...</h4></div>
+                <div class="text-right"><p class="text-[8px] font-bold text-slate-400 uppercase">Payout</p><h2 class="text-2xl font-black italic">₹<span id="fareVal">0</span></h2></div>
+            </div>
+            <button onclick="secureAccept()" class="w-full bg-slate-900 text-white py-6 rounded-3xl font-black text-lg active:scale-95">ACCEPT MISSION</button>
+        </div>
+
+        <div id="tripActive" class="hidden space-y-4">
+            <div class="bg-sky-600 p-6 rounded-[2.5rem] flex justify-between items-center shadow-xl">
+                <div><p class="text-[10px] font-black text-white/70 uppercase">In-Progress</p><h4 id="activeDest" class="text-lg font-black text-white italic">Drop Point</h4></div>
+                <i class="fa-solid fa-location-arrow text-white animate-pulse"></i>
+            </div>
+            <button id="startBtn" onclick="openPinModal()" class="w-full bg-white text-slate-900 py-6 rounded-3xl font-black text-lg">ENTER START PIN</button>
+            <button id="finishBtn" onclick="completeMission()" class="hidden w-full bg-emerald-500 text-white py-6 rounded-3xl font-black text-lg">COMPLETE MISSION</button>
+        </div>
+    </div>
+</div>
+
+<div id="pinModal" class="hidden fixed inset-0 z-[2000] bg-slate-950/95 flex items-center justify-center p-6 text-center">
+    <div class="bg-white p-8 rounded-[2.5rem] w-full max-w-xs shadow-2xl">
+        <h3 class="text-slate-900 font-black text-xl mb-4 italic">Confirm PIN</h3>
+        <input id="modalPin" type="number" placeholder="PIN" class="w-full p-5 bg-slate-100 border-2 border-sky-500 rounded-2xl text-center text-4xl font-black mb-4 outline-none text-slate-900">
+        <button onclick="checkRidePin()" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black">START RIDE</button>
+        <button onclick="closePinModal()" class="text-slate-400 text-[10px] mt-4 uppercase font-bold">Close</button>
+    </div>
+</div>
+
+<script>
+/* 🔹 1️⃣ BACKEND SERVER CONFIG */
+const SERVER = "https://yatri-backend-production.up.railway.app";
+
+const firebaseConfig = { apiKey:"AIzaSyB4MAKQNOKBUxSSbByIA9-SxUwHqJDl_t8", authDomain:"yatri-com.firebaseapp.com", databaseURL:"https://yatri-com-default-rtdb.firebaseio.com", projectId:"yatri-com" };
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth(), db = firebase.database();
+
+let uid, map, uMarker, isOnline = false, activeRideId = null, currentRideData = null;
+
+/* 🛡️ AUTH */
+window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {size:'invisible'});
+function sendOTP() {
+    const phone = "+91" + document.getElementById('phone').value;
+    auth.signInWithPhoneNumber(phone, recaptchaVerifier).then(res => { window.confirmRes = res; document.getElementById('authUI').classList.add('hidden'); document.getElementById('otpUI').classList.remove('hidden'); });
+}
+function verifyOTP() {
+    confirmRes.confirm(document.getElementById('otpCode').value).then(res => { uid = res.user.uid; document.getElementById('loginPage').classList.add('hidden'); document.getElementById('mainApp').classList.remove('hidden'); initMap(); syncData(); });
+}
+
+/* 🗺️ MAP & GPS */
+function initMap() {
+    map = L.map('map', { zoomControl: false, attributionControl: false }).setView([23.7, 88.3], 15);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+    uMarker = L.circleMarker([0,0], { color: '#0ea5e9', radius: 10, fillOpacity: 1, weight: 6, fillColor: 'white' }).addTo(map);
+
+    navigator.geolocation.watchPosition(p => {
+        const lat = p.coords.latitude, lng = p.coords.longitude;
+        uMarker.setLatLng([lat, lng]);
+        if(isOnline) { db.ref(`drivers/${uid}/location`).set({lat, lng, ts: Date.now()}); map.panTo([lat, lng]); }
+    }, null, { enableHighAccuracy: true });
+}
+
+function syncData() {
+    db.ref(`drivers/${uid}/wallet`).on('value', s => { document.getElementById('walletAmt').innerText = (s.val() || 0).toFixed(2); });
+}
+
+/* ⚡ DUTY CONTROL */
+async function toggleDuty() {
+    isOnline = !isOnline;
+    db.ref(`drivers/${uid}/online`).set(isOnline);
+    db.ref(`drivers/${uid}/busy`).set(false);
+
+    document.getElementById('dutyBtn').innerText = isOnline ? "GO OFFLINE" : "GO ONLINE";
+    document.getElementById('dutyBtn').className = isOnline ? "w-full bg-slate-800 text-white py-7 rounded-[2.5rem] font-black text-xl" : "w-full bg-red-600 text-white py-7 rounded-[2.5rem] font-black text-xl";
+    document.getElementById('statusDot').className = isOnline ? "w-2.5 h-2.5 rounded-full bg-emerald-500" : "w-2.5 h-2.5 rounded-full bg-red-500";
+    document.getElementById('statusTxt').innerText = isOnline ? "Online" : "Standby";
+
+    if(isOnline) listenForMissions();
+    else db.ref('rides').off();
+}
+
+function listenForMissions() {
+    db.ref('rides').orderByChild('status').equalTo('requested').on('child_added', snap => {
+        const r = snap.val();
+        if(r.driverId !== uid) return; 
+
+        if(!activeRideId) {
+            activeRideId = snap.key;
+            currentRideData = r;
+            document.getElementById('dutyView').classList.add('hidden');
+            document.getElementById('missionPopup').classList.remove('hidden');
+            document.getElementById('dropName').innerText = r.drop;
+            document.getElementById('fareVal').innerText = r.fare;
+
+            db.ref(`rides/${activeRideId}/status`).on('value', s => {
+                if(s.val() === 'cancelled' || s.val() === 'timeout') {
+                    alert("Mission Aborted.");
+                    location.reload();
+                }
+            });
+        }
+    });
+}
+
+/* 🔴 secureAccept() BACKEND INTEGRATED */
+async function secureAccept(){
+    await fetch(SERVER+"/acceptRide",{
+        method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+            rideId: activeRideId,
+            driverId: uid
+        })
+    });
+
+    document.getElementById('missionPopup').classList.add('hidden');
+    document.getElementById('tripActive').classList.remove('hidden');
+    document.getElementById('activeDest').innerText = currentRideData.drop;
+}
+
+function openPinModal() { document.getElementById('pinModal').classList.remove('hidden'); }
+function closePinModal() { document.getElementById('pinModal').classList.add('hidden'); }
+
+async function checkRidePin() {
+    if(document.getElementById('modalPin').value == currentRideData.otp) {
+        await db.ref(`rides/${activeRideId}`).update({ status: 'started' });
+        closePinModal();
+        document.getElementById('startBtn').classList.add('hidden');
+        document.getElementById('finishBtn').classList.remove('hidden');
+    } else alert("Invalid PIN");
+}
+
+/* 🔴 completeMission() BACKEND INTEGRATED */
+async function completeMission(){
+    await fetch(SERVER+"/completeRide",{
+        method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({rideId:activeRideId})
+    });
+
+    alert("Mission completed");
+    location.reload();
+}
+</script>
+</body>
+</html>
